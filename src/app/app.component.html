@@ -1,0 +1,261 @@
+<ng-container *ngIf="isAuthenticated(); else authScreen">
+<div class="layout">
+  <aside>
+    <header class="aside-header">
+      <div class="aside-top">
+        <h2>Workspace</h2>
+      </div>
+      <div class="user-meta">
+        <span class="pill">{{ currentEmailSig() }}</span>
+        <button class="btn ghost" type="button" (click)="logout()">Logout</button>
+      </div>
+      <button class="btn ghost full" type="button" (click)="showFoldersSig.set(!showFoldersSig())">
+        {{ showFoldersSig() ? 'Hide folders' : 'Show folders' }}
+      </button>
+      <button class="btn ghost full" type="button" (click)="quickCreateFolder()">Add Folder</button>
+      <p class="hint" *ngIf="!store.folders().length && dataReadySig()">Add a folder to start syncing to Firestore.</p>
+    </header>
+    <div class="tree" *ngIf="showFoldersSig()">
+      <div class="folder-node" *ngFor="let folder of store.folders(); trackBy: trackById">
+        <div class="folder-row">
+          <button
+            class="folder-btn"
+            [class.active]="folder.id === selectedFolderId()"
+            (click)="onFolderClick(folder)"
+            (dblclick)="renameFolder(folder.id, folder.name)">
+            <span class="name">{{ folder.name }}</span>
+          </button>
+          <button class="chevron" type="button" (click)="toggleFolderCollapse(folder.id)">
+            {{ isFolderCollapsed(folder.id) ? '>' : 'v' }}
+          </button>
+        </div>
+        <div class="section-nav" *ngIf="folder.id === selectedFolderId() && !isFolderCollapsed(folder.id)">
+          <button
+            *ngFor="let section of folder.sections; trackBy: trackById"
+            class="section-link"
+            [class.active]="store.isSectionOpen(folder.id, section.id)"
+            (click)="store.openSection(folder.id, section.id)"
+            (dblclick)="renameSection(folder.id, section.id, section.name, section.link)">
+            {{ section.name }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <main *ngIf="store.selectedFolder() as folder">
+    <header class="toolbar">
+      <div class="crumb">
+        <span>{{ folder.name }}</span>
+        <ng-container *ngIf="openSection() as sec"> / <span>{{ sec.name }}</span></ng-container>
+      </div>
+      <div class="actions">
+        <button class="btn ghost" type="button" (click)="renameFolder(folder.id, folder.name)">Rename folder</button>
+        <button class="btn ghost danger" type="button" (click)="confirmDeleteFolder(folder.id, folder.name)">Delete folder</button>
+        <button class="btn ghost" type="button" *ngIf="openSection()" (click)="renameSection(folder.id, openSection()!.id, openSection()!.name, openSection()!.link)">Rename subfolder</button>
+        <button class="btn ghost danger" type="button" *ngIf="openSection()" (click)="confirmDeleteSection(folder.id, openSection()!.id, openSection()!.name)">Delete subfolder</button>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="section-header">
+        <div class="section-header-row">
+          <span>Add subfolder</span>
+          <button class="btn ghost" type="button" (click)="showSectionControlsSig.set(!showSectionControlsSig())">
+            {{ showSectionControlsSig() ? 'Hide' : 'Show' }}
+          </button>
+        </div>
+        <div class="inline-form" *ngIf="showSectionControlsSig()">
+          <input [(ngModel)]="sectionName" name="sectionName" placeholder="New subfolder" />
+          <select [(ngModel)]="sectionType" name="sectionType">
+            <option value="general">General</option>
+            <option value="trip">Trip</option>
+            <option value="assignment">Assignment</option>
+          </select>
+          <input [(ngModel)]="sectionLink" name="sectionLink" placeholder="Optional link" />
+          <button class="btn subtle" type="button" (click)="addSection(folder.id)">
+            Add subfolder
+          </button>
+        </div>
+      </div>
+
+      <ng-container *ngIf="openSection() as section; else pickSection">
+        <div class="section-body">
+          <h3 class="todo-heading">Todos</h3>
+          <header class="sub-toolbar">
+            <div class="links">
+              <a *ngIf="section.link" [href]="section.link" target="_blank" rel="noopener">Open link</a>
+            </div>
+            <div class="actions">
+              <button class="btn ghost" type="button" (click)="quickCreateTodo()">Ctrl+Shift+F New todo</button>
+              <button class="btn ghost" type="button" (click)="deleteSelectedTodos(folder.id, section.id)" [disabled]="!store.selectedTodoIds().size">Delete selected</button>
+              <label class="sort">
+                <span>Sort</span>
+                <select (change)="setSort($any($event.target).value)" [ngModel]="sortModeSig()">
+                  <option value="manual">Manual</option>
+                  <ng-container *ngIf="section.type !== 'trip'">
+                    <option value="name-asc">Name ASC</option>
+                    <option value="name-desc">Name DESC</option>
+                  </ng-container>
+                  <ng-container *ngIf="section.type === 'assignment'">
+                    <option value="due-asc">Deadline ASC</option>
+                    <option value="due-desc">Deadline DESC</option>
+                    <option value="course">Course</option>
+                  </ng-container>
+                  <ng-container *ngIf="section.type === 'trip'">
+                    <option value="visited">Visited first</option>
+                  </ng-container>
+                </select>
+              </label>
+            </div>
+          </header>
+
+          <ng-container *ngIf="section.type === 'trip'; else defaultTodos">
+            <div class="bucket">
+              <button class="bucket-header" type="button" (click)="toggleBucket(section.id, 'visited')">
+                {{ isBucketCollapsed(section.id, 'visited') ? '>' : 'v' }} Visited
+              </button>
+              <ul class="todo-list" *ngIf="!isBucketCollapsed(section.id, 'visited')">
+                <li *ngFor="let todo of tripBuckets(section).visited; trackBy: trackById" (dblclick)="startEdit(todo)">
+                 <div class="todo-main">
+                    <input type="checkbox" [checked]="store.selectedTodoIds().has(todo.id)" (change)="store.toggleTodoSelect(todo.id)" />
+                    <div class="todo-text">
+                      <span class="todo-title" [class.done]="todo.status === 'done'">{{ todo.details?.location || todo.title }}</span>
+                      <small class="meta">
+                        <ng-container *ngIf="todo.due"> - due {{ todo.due | date:'shortDate' }}</ng-container>
+                        <ng-container *ngIf="todo.details?.visitedDate"> - visited {{ todo.details?.visitedDate | date:'shortDate' }}</ng-container>
+                      </small>
+                    </div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn chip" type="button" (click)="store.updateTodo(folder.id, section.id, todo.id, { status: todo.status === 'done' ? 'pending' : 'done' })">
+                      {{ todo.status === 'done' ? 'Undo' : 'Done' }}
+                    </button>
+                    <button class="btn subtle" type="button" (click)="startEdit(todo)">Rename</button>
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div class="bucket">
+              <button class="bucket-header" type="button" (click)="toggleBucket(section.id, 'notVisited')">
+                {{ isBucketCollapsed(section.id, 'notVisited') ? '>' : 'v' }} Not visited
+              </button>
+              <ul class="todo-list" *ngIf="!isBucketCollapsed(section.id, 'notVisited')">
+                <li *ngFor="let todo of tripBuckets(section).notVisited; trackBy: trackById" (dblclick)="startEdit(todo)">
+                 <div class="todo-main">
+                    <input type="checkbox" [checked]="store.selectedTodoIds().has(todo.id)" (change)="store.toggleTodoSelect(todo.id)" />
+                    <div class="todo-text">
+                      <span class="todo-title" [class.done]="todo.status === 'done'">{{ todo.details?.location || todo.title }}</span>
+                      <small class="meta">
+                        <ng-container *ngIf="todo.due"> - due {{ todo.due | date:'shortDate' }}</ng-container>
+                      </small>
+                    </div>
+                  </div>
+                  <div class="actions">
+                    <button class="btn chip" type="button" (click)="store.updateTodo(folder.id, section.id, todo.id, { status: todo.status === 'done' ? 'pending' : 'done' })">
+                      {{ todo.status === 'done' ? 'Undo' : 'Done' }}
+                    </button>
+                    <button class="btn subtle" type="button" (click)="markVisited(folder.id, section.id, todo)">Mark visited</button>
+                    <button class="btn subtle" type="button" (click)="startEdit(todo)">Rename</button>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </ng-container>
+          <ng-template #defaultTodos>
+            <ul class="todo-list">
+              <li *ngFor="let todo of sortedTodos(section); trackBy: trackById" (dblclick)="startEdit(todo)">
+                <div class="todo-main">
+                  <input type="checkbox" [checked]="store.selectedTodoIds().has(todo.id)" (change)="store.toggleTodoSelect(todo.id)" />
+                  <div class="todo-text">
+                    <span class="todo-title" [class.done]="todo.status === 'done'">
+                      <ng-container [ngSwitch]="section.type">
+                        <ng-container *ngSwitchCase="'assignment'">
+                          {{ todo.title }}
+                        </ng-container>
+                        <ng-container *ngSwitchCase="'trip'">
+                          {{ todo.details?.location || todo.title }}
+                        </ng-container>
+                        <ng-container *ngSwitchDefault>
+                          {{ todo.title }}
+                        </ng-container>
+                      </ng-container>
+                    </span>
+                    <small class="meta">
+                    <ng-container [ngSwitch]="section.type">
+                      <ng-container *ngSwitchCase="'assignment'">
+                        <ng-container *ngIf="todo.details?.course">Course: {{ todo.details?.course }}</ng-container>
+                        <ng-container *ngIf="todo.due"> - due {{ todo.due | date:'shortDate' }}</ng-container>
+                      </ng-container>
+                      <ng-container *ngSwitchDefault>
+                        <ng-container *ngIf="todo.due"> - due {{ todo.due | date:'shortDate' }}</ng-container>
+                      </ng-container>
+                    </ng-container>
+                  </small>
+                  </div>
+                </div>
+                <div class="actions">
+                  <button class="btn chip" type="button" (click)="store.updateTodo(folder.id, section.id, todo.id, { status: todo.status === 'done' ? 'pending' : 'done' })">
+                    {{ todo.status === 'done' ? 'Undo' : 'Done' }}
+                  </button>
+                  <button class="btn subtle" type="button" (click)="startEdit(todo)">Rename</button>
+                </div>
+              </li>
+            </ul>
+          </ng-template>
+
+          <form (ngSubmit)="submitTodo(folder.id, section.id)" class="inline-form todo-form">
+            <ng-container [ngSwitch]="section.type">
+              <ng-container *ngSwitchCase="'assignment'">
+                <input [(ngModel)]="todoTitle" name="todoTitle" placeholder="Subject" required />
+                <input [(ngModel)]="todoCourse" name="todoCourse" placeholder="Course" />
+                <input [(ngModel)]="todoDue" name="todoDue" type="date" placeholder="Deadline" (focus)="openPicker($event)" />
+              </ng-container>
+              <ng-container *ngSwitchCase="'trip'">
+                <input [(ngModel)]="todoLocation" name="todoLocation" placeholder="Place" (ngModelChange)="todoTitle = $event || todoTitle" />
+                <label class="visited">
+                  <input type="checkbox" [(ngModel)]="todoVisited" name="todoVisited" />
+                  Visited
+                </label>
+                <input [(ngModel)]="todoVisitedDate" name="todoVisitedDate" type="date" placeholder="Visited date" (focus)="openPicker($event)" />
+              </ng-container>
+              <ng-container *ngSwitchDefault>
+                <input [(ngModel)]="todoTitle" name="todoTitle" placeholder="Todo title" required />
+                <input [(ngModel)]="todoDue" name="todoDue" type="date" placeholder="Deadline" (focus)="openPicker($event)" />
+              </ng-container>
+            </ng-container>
+            <button class="btn" type="submit">{{ editingTodoSig() ? 'Update' : 'Add Todo' }}</button>
+            <button class="btn ghost" type="button" (click)="editingTodoSig.set(null); resetTodoForm();">Cancel</button>
+          </form>
+        </div>
+      </ng-container>
+      <ng-template #pickSection>
+        <div class="empty">Select or create a subfolder to start adding todos.</div>
+      </ng-template>
+    </section>
+  </main>
+</div>
+</ng-container>
+
+<ng-template #authScreen>
+  <div class="auth">
+    <div class="auth-card">
+      <h1 class="app-title">Angular Todo App</h1>
+      <div class="auth-toggle">
+        <button class="btn" [class.active]="authMode==='login'" (click)="authMode='login'">Login</button>
+        <button class="btn" [class.active]="authMode==='signup'" (click)="authMode='signup'">Signup</button>
+      </div>
+      <form (ngSubmit)="authMode==='login' ? login() : signup()" class="auth-form">
+        <input [(ngModel)]="authUsername" name="authUsername" placeholder="Email" type="email" required />
+        <div class="password-row">
+          <input [(ngModel)]="authPassword" name="authPassword" placeholder="Password" [type]="showPassword ? 'text' : 'password'" required />
+          <button type="button" class="eye" (click)="showPassword = !showPassword">{{ showPassword ? '🙈' : '👁' }}</button>
+        </div>
+        <button type="button" class="link-btn" (click)="sendReset()">Forgot password?</button>
+        <button class="btn primary" type="submit">{{ authMode==='login' ? 'Login' : 'Create account' }}</button>
+      </form>
+      <p class="hint">Data is kept per username (locally stored; passwords are hashed).</p>
+      <a class="footer-link" href="https://github.com/" target="_blank" rel="noopener">View features / GitHub</a>
+    </div>
+  </div>
+</ng-template>
